@@ -1,0 +1,41 @@
+# Имя проекта (и, как следствие, имена образа/контейнера) Docker Compose
+# берёт из имени папки клона — каждая установка изолирована сама по себе.
+# НЕ хардкодим container_name/image: иначе вторая установка (другой
+# родитель / dogfooding) столкнётся с первой по глобальному имени
+# контейнера и пересоберёт общий образ.
+# Переопределить имя при желании: COMPOSE_PROJECT_NAME в .env.
+services:
+  bot:
+    build:
+      context: ./bot
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./bot/.env
+    environment:
+      TZ: Europe/Moscow
+    volumes:
+      - ./inbox:/app/inbox
+      - ./history:/app/history
+      - ./reports:/app/reports
+      - ./specialists:/app/specialists
+      - ./data:/app/data
+      - ./questions:/app/questions
+      - ./agents:/app/agents
+      - ./commands:/app/commands:ro
+      - ./bot/logs:/app/bot/logs
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=3).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.env
+.env.local
+logs/
+*.log
+.DS_Store
+com.elisoncha-doc.bot.plist
+install.sh
+start.sh
+sample_render.py

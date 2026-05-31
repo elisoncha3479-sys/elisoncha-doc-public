@@ -1,0 +1,49 @@
+# ─── Секреты — НИКОГДА в git (.env.example остаётся) ────────────────
+.env
+**/.env
+*.env
+!.env.example
+!**/.env.example
+
+# ─── Персональные / медицинские данные — НИКОГДА в git ──────────────
+# Папки создаются в рантайме (Dockerfile mkdir / volume).
+inbox/
+patient_inbox/
+**/patient_inbox/
+history/
+reports/
+questions/
+data/
+
+# Манифест массового загрузчика — содержит имена личных файлов.
+.bulk_import_done.json
+**/.bulk_import_done.json
+
+# Память специалистов: per-doc заметки + profile.md — данные пациента.
+# В репозитории держим ТОЛЬКО пустой каркас папок (.gitkeep).
+specialists/**
+!specialists/
+!specialists/*/
+!specialists/*/.gitkeep
+
+# ─── Python / окружение ─────────────────────────────────────────────
+.venv/
+venv/
+**/venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+**/.pytest_cache/
+
+# ─── Локальные рабочие заметки (имена/детали инцидентов — не публикуем) ─
+Bugs.md
+BACKLOG.md
+INCIDENT-*.md
+PLAN-*.md
+
+# ─── Системное ──────────────────────────────────────────────────────
+.DS_Store
+*.DS_Store
+*.log
+bot/logs/
