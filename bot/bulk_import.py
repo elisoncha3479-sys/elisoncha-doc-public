@@ -16,8 +16,8 @@
   - рекурсивный обход папки (вложенные подпапки);
   - идемпотентность и возобновление с места обрыва через
     JSON-манифест обработанных файлов;
-  - путь нейтральный (env PATIENT_INBOX_DIR) — никакой зашитой
-    «МАМА»;
+  - путь нейтральный (env PATIENT_INBOX_DIR) — никакого зашитого
+    имени пациента в пути;
   - деструктив (удаление сырья) ТОЛЬКО под флагом --delete-after и
     ТОЛЬКО после успешного разбора файла; по умолчанию ничего не
     удаляется, оригиналы остаются.
@@ -61,13 +61,13 @@ log = logging.getLogger("bulk_import")
 
 SUPPORTED = {".jpg", ".jpeg", ".png", ".heic", ".pdf", ".docx"}
 
-# Нейтральный дефолт — НЕ зашитый «inbox/МАМА» (план 11.13 п.4).
+# Нейтральный дефолт — НЕ зашитый путь с именем пациента (план 11.13 п.4).
 DEFAULT_INBOX = Path(__file__).resolve().parent.parent / "patient_inbox"
 
 
 def inbox_dir() -> Path:
     """Папка с документами. Берётся из env PATIENT_INBOX_DIR,
-    дефолт — нейтральный patient_inbox/ (не «МАМА»)."""
+    дефолт — нейтральный patient_inbox/ (без имени пациента в пути)."""
     raw = os.environ.get("PATIENT_INBOX_DIR", "").strip()
     return Path(raw) if raw else DEFAULT_INBOX
 

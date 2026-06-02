@@ -1,5 +1,5 @@
 """
-Пакетная обработка медицинских документов — извлечение текста из всех файлов в inbox/МАМА/.
+Пакетная обработка медицинских документов — извлечение текста из всех файлов в patient_inbox/.
 Запуск: python batch_process.py
 """
 
@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from ocr import extract_text, save_text_sidecar, ExtractionResult
 
-INBOX = Path(__file__).parent.parent / "inbox" / "МАМА"
+INBOX = Path(__file__).parent.parent / "patient_inbox"
 SUPPORTED = {".jpg", ".jpeg", ".png", ".heic", ".pdf", ".docx"}
 
 

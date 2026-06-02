@@ -537,11 +537,18 @@ async def run_reconcile_and_notify(app: Application, reason: str = "manual") -> 
         log.info("Reconcile diff пустой и reason=%s — уведомление не шлю", reason)
         return candidate
 
-    # manual без изменений или с изменениями, либо hook/cron с изменениями → уведомляем
+    # Владелец (2026-06): авто-сверка больше НЕ уведомляет никого (ни группу,
+    # ни владельца) — только молча обновляет файл схемы. Сигнал уходит ТОЛЬКО на
+    # ручной запрос (/reconcile_meds) — в личку владельцу.
+    if not is_manual:
+        log.info(
+            "Авто-сверка (reason=%s): изменения есть, но уведомления отключены — "
+            "файл схемы обновлён молча", reason
+        )
+        return candidate
+
     notification = await _format_group_notification(diff_summary=diff_summary)
-    # Routing: manual инициировал владелец → ему в личку. Hook/cron — сигнал пациенту → в группу.
-    target = "owner" if is_manual else "group"
-    await _send_notification(app, notification, target=target)
+    await _send_notification(app, notification, target="owner")
     return candidate
 
 
@@ -556,7 +563,7 @@ async def maybe_run_reconcile_after_refresh(
     у которого ФАКТИЧЕСКИ изменился раздел 4 «Лекарства» (smart-фильтр,
     backlog #4). Раньше сверка запускалась при любом refresh фарм-активного
     специалиста — например, после УЗДС-документа в кардио-профиль, где раздел
-    лекарств не трогается, — и слала лишнее уведомление маме/владельцу.
+    лекарств не трогается, — и слала лишнее уведомление пациенту/владельцу.
 
     meds_changed_dirs=None → старое поведение (стрелять на любой refresh
     фарм-активного): нужно для обратной совместимости и вызовов без
@@ -582,15 +589,6 @@ async def maybe_run_reconcile_after_refresh(
         # failsafe: hook никогда не должен ломать основной pipeline
         log.error("Reconcile hook упал (не критично): %s", e, exc_info=False)
         return None
-
-
-async def scheduled_monthly_reconcile(app: Application) -> None:
-    """Cron-точка: 1-го числа в 09:00 МСК (за час до monthly digest)."""
-    log.info("Monthly reconcile (cron) старт")
-    try:
-        await run_reconcile_and_notify(app, reason="monthly_cron")
-    except Exception as e:
-        log.error("Monthly reconcile упал: %s", e, exc_info=True)
 
 
 def load_latest_reconciliation(max_age_days: int = 35) -> Optional[str]:

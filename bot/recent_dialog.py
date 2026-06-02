@@ -33,7 +33,7 @@ ENABLED = os.environ.get("RECENT_DIALOG_ENABLED", "true").strip().lower() != "fa
 
 _TS_NAME = re.compile(r"^(\d{4}-\d{2}-\d{2})_(\d{6})_chat\.txt$")
 _USER_PREFIX = re.compile(
-    r"^(?:Сообщение мамы(?:\s*\([^)]*\))?:|Вопрос:)\s*",
+    r"^(?:Сообщение пациента(?:\s*\([^)]*\))?:|Вопрос:)\s*",
     re.MULTILINE,
 )
 _REPLY_SEP = re.compile(r"\n\nОтвет:\s*", re.MULTILINE)

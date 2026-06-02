@@ -35,7 +35,7 @@ from context import (
     build_clinical_context,
     build_report_text_summary,
 )
-from digest import _maybe_propose_new_specialist, send_weekly_digest, send_monthly_digest
+from digest import _maybe_propose_new_specialist, send_monthly_survey, scheduled_staff_audit
 from health import heartbeat, start_health_server, HEARTBEAT_INTERVAL
 from historical_check import historical_check
 from ocr_validator import (
@@ -64,7 +64,6 @@ import pending_batches
 from reconcile import (
     maybe_run_reconcile_after_refresh,
     run_reconcile_and_notify,
-    scheduled_monthly_reconcile,
 )
 from report_renderer import render_pdf_to_file
 from staff_audit import (
@@ -612,7 +611,7 @@ async def on_identity_triage(update: Update, context: ContextTypes.DEFAULT_TYPE)
     """Две кнопки охранника (владелец, инцидент 013).
 
     «Случайно» → ничего не делаем, ничего не сохраняем.
-    «Подтверждаю — это анализ мамы» → запускаем полный обычный разбор
+    «Подтверждаю — это мой анализ» → запускаем полный обычный разбор
     как принадлежащий пациенту (человек поручился глазами — страховка от ошибки OCR)."""
     query = update.callback_query
     if not query:
@@ -681,7 +680,7 @@ async def _finalize_analysis(
     после ответа на встречный вопрос (где вопросы уже задавать нельзя)."""
 
     # 1) ОТЧЁТ ПАЦИЕНТУ — ПЕРВЫМ ДЕЛОМ. Раньше PDF уходил после refresh +
-    # медленной сверки лекарств (мама ждала ~11 минут). Теперь память и
+    # медленной сверки лекарств (пациент ждал ~11 минут). Теперь память и
     # сверка идут ПОСЛЕ доставки и её не задерживают (согласовано
     # 2026-05-16). Их падение на уже отправленный отчёт не влияет.
     pdf_path = _save_and_render(ts, analysis)
@@ -697,14 +696,14 @@ async def _finalize_analysis(
     # разбора. recent_dialog читает только *_chat.txt; раньше документ
     # сохранялся лишь как *_analysis.json и в память разговора не попадал —
     # уточняющий вопрос отвечался «с чистого листа», без связи с разбором
-    # (живой тест Алисы 2026-05-30). Деградированный разбор в память
+    # (живой тест, 2026-05). Деградированный разбор в память
     # разговора не пишем — как и в долгую память (Тема 2).
     if not is_degraded(analysis):
         try:
             summary = build_report_text_summary(analysis)
             dialog_path = HISTORY / f"{ts}_chat.txt"
             dialog_path.write_text(
-                "Сообщение мамы (документ): прислала медицинский документ на разбор\n\n"
+                "Сообщение пациента (документ): прислал медицинский документ на разбор\n\n"
                 f"Ответ: {summary}",
                 encoding="utf-8",
             )
@@ -741,7 +740,7 @@ async def _run_pipeline(
 ) -> None:
     """Конвейер ПОСЛЕ identity-гейта: OCR-валидатор → анализ →
     historical-check → defer/финал. Вынесен, чтобы его мог запустить и
-    обычный батч, и кнопка «Подтверждаю — это анализ мамы» (инцидент 013).
+    обычный батч, и кнопка «Подтверждаю — это мой анализ» (инцидент 013).
     Имеет свой try/except: вызывается из двух мест."""
     source_name = all_paths[0].name if all_paths else "—"
     try:
@@ -1046,18 +1045,11 @@ async def cmd_onboarding(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None
     await update.message.reply_text(ONBOARDING_QUESTIONS)
 
 
-async def cmd_digest_weekly(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+async def cmd_monthly_survey(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+    """Ручной запуск месячного вопроса пациенту (то же, что по расписанию 1-го числа)."""
     if not await _chat_gate(update):
         return
-    await update.message.reply_text("Готовлю еженедельное письмо, минуту…")
-    await send_weekly_digest(ctx.application)
-
-
-async def cmd_digest_monthly(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
-    if not await _chat_gate(update):
-        return
-    await update.message.reply_text("Готовлю ежемесячный обзор, это может занять пару минут…")
-    await send_monthly_digest(ctx.application)
+    await send_monthly_survey(ctx.application)
 
 
 async def cmd_reconcile_meds(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -1364,12 +1356,12 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             reply = res["reply"]
             dialog_path = HISTORY / f"{ts}_chat.txt"
             dialog_path.write_text(
-                f"Сообщение мамы ({res['intent']}): {text}\n\nОтвет: {reply}",
+                f"Сообщение пациента ({res['intent']}): {text}\n\nОтвет: {reply}",
                 encoding="utf-8",
             )
             await update.message.reply_text(reply)
         except Exception as e:
-            log.error("Ошибка при обработке сообщения мамы: %s", e, exc_info=True)
+            log.error("Ошибка при обработке сообщения пациента: %s", e, exc_info=True)
             await update.message.reply_text(
                 "Извините, не смогла ответить. Попробуйте ещё раз."
             )
@@ -1404,17 +1396,17 @@ async def _post_init(app: Application) -> None:
         replace_existing=True,
     )
     scheduler.add_job(
-        send_weekly_digest,
-        CronTrigger(day_of_week="sun", hour=10, minute=0),
+        send_monthly_survey,
+        CronTrigger(day=1, hour=10, minute=0),
         args=[app],
-        id="weekly_digest",
+        id="monthly_survey",
         replace_existing=True,
     )
     scheduler.add_job(
-        send_monthly_digest,
-        CronTrigger(day=1, hour=10, minute=0),
+        scheduled_staff_audit,
+        CronTrigger(day=1, hour=10, minute=5),
         args=[app],
-        id="monthly_digest",
+        id="staff_audit",
         replace_existing=True,
     )
     scheduler.add_job(
@@ -1424,17 +1416,10 @@ async def _post_init(app: Application) -> None:
         id="history_regen_daily",
         replace_existing=True,
     )
-    scheduler.add_job(
-        scheduled_monthly_reconcile,
-        CronTrigger(day=1, hour=9, minute=0),
-        args=[app],
-        id="monthly_reconcile",
-        replace_existing=True,
-    )
     scheduler.start()
     log.info(
-        "Планировщик: weekly=вс 10:00, monthly=1-е 10:00, "
-        "reconcile=1-е 09:00, history-regen=ежедневно 06:00 МСК"
+        "Планировщик: monthly-survey=1-е 10:00, staff-audit=1-е 10:05, "
+        "history-regen=ежедневно 06:00 МСК"
     )
 
 
@@ -1443,8 +1428,7 @@ def main() -> None:
 
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("onboarding", cmd_onboarding))
-    app.add_handler(CommandHandler("digest_weekly", cmd_digest_weekly))
-    app.add_handler(CommandHandler("digest_monthly", cmd_digest_monthly))
+    app.add_handler(CommandHandler("monthly_survey", cmd_monthly_survey))
     app.add_handler(CommandHandler("reconcile_meds", cmd_reconcile_meds))
     app.add_handler(CommandHandler("propose_specialist", cmd_propose_specialist))
     app.add_handler(CommandHandler("show_draft", cmd_show_draft))

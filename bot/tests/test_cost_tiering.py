@@ -20,7 +20,6 @@ SONNET = "claude-sonnet-4-6"
     ("historical_check", "CHECK_MODEL"),
     ("profile_refresher", "REFRESHER_MODEL"),
     ("reconcile", "RECONCILE_MODEL"),
-    ("digest", "DIGEST_MODEL"),
     ("history_regenerator", "REGEN_MODEL"),
 ])
 def test_mechanical_steps_default_to_haiku(module, attr):
@@ -42,7 +41,7 @@ def test_routing_haiku_but_reasoning_stays_sonnet(monkeypatch):
 
 
 def test_patient_facing_reply_stays_sonnet():
-    """Ответы маме в чат — тепло и точность важны, остаются на Sonnet."""
+    """Ответы пациенту в чат — тепло и точность важны, остаются на Sonnet."""
     pm = importlib.import_module("patient_message")
     assert pm.PATIENT_MSG_MODEL == SONNET
 

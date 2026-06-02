@@ -8,7 +8,7 @@
   - рекурсивный обход (вложенные подпапки — ок);
   - идемпотентность/возобновление: уже обработанное пропускается
     (манифест);
-  - путь нейтральный (PATIENT_INBOX_DIR), не зашитый «МАМА»;
+  - путь нейтральный (PATIENT_INBOX_DIR), без зашитого имени пациента;
   - запись в память — через общую persist (parity), app=None,
     run_reconcile=False (никакого спама в чат);
   - деструктив (удаление сырья) только под флагом и ТОЛЬКО после
@@ -96,8 +96,8 @@ def test_inbox_dir_is_neutral_from_env(tmp_path, monkeypatch):
     monkeypatch.setenv("PATIENT_INBOX_DIR", str(tmp_path / "myinbox"))
     got = bulk_import.inbox_dir()
     assert got == (tmp_path / "myinbox")
-    # путь не зашит на «МАМА»
-    assert "МАМА" not in str(got)
+    # путь не зашит на имя пациента — берётся строго из env
+    assert str(got).endswith("myinbox")
 
 
 def test_process_one_uses_shared_persist_without_chat(tmp_path, wired):

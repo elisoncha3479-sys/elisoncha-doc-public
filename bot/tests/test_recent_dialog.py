@@ -31,12 +31,12 @@ def _write_chat(dir: Path, ts: str, user: str, assistant: str,
 
 def test_parses_operator_format(tmp_path, monkeypatch):
     rd = _reload(monkeypatch, RECENT_DIALOG_ENABLED="true")
-    _write_chat(tmp_path, "2026-05-30_120000", "Что у мамы по почкам?",
+    _write_chat(tmp_path, "2026-05-30_120000", "Что у пациента по почкам?",
                 "По последним анализам всё стабильно.")
     now = datetime(2026, 5, 30, 13, 0, 0)
     out = rd.load_recent_turns(tmp_path, now=now)
     assert out == [
-        {"role": "user", "content": "Что у мамы по почкам?"},
+        {"role": "user", "content": "Что у пациента по почкам?"},
         {"role": "assistant", "content": "По последним анализам всё стабильно."},
     ]
 
@@ -45,7 +45,7 @@ def test_parses_patient_format_with_intent(tmp_path, monkeypatch):
     rd = _reload(monkeypatch, RECENT_DIALOG_ENABLED="true")
     p = tmp_path / "2026-05-30_120000_chat.txt"
     p.write_text(
-        "Сообщение мамы (clinical): Давление 140/90, болит затылок\n\n"
+        "Сообщение пациента (clinical): Давление 140/90, болит затылок\n\n"
         "Ответ: Зафиксировали у кардиолога.",
         encoding="utf-8",
     )
@@ -202,21 +202,21 @@ def test_document_turn_is_visible_to_recent_dialog(tmp_path, monkeypatch):
     """Parity-guard писатель↔парсер: формат, которым main.py пишет
     документный ход в *_chat.txt после отправки PDF, должен корректно
     разбираться recent_dialog. Иначе follow-up снова перестанет видеть
-    разбор (живой тест Алисы 2026-05-30).
+    разбор (живой тест, 2026-05).
 
     Формат-эталон должен совпадать с веткой 1b в bot/main.py
     (_finalize_analysis)."""
     rd = _reload(monkeypatch, RECENT_DIALOG_ENABLED="true")
     summary = "# Анализ крови\n\n**Главное:** гемоглобин в норме"
     (tmp_path / "2026-05-30_120000_chat.txt").write_text(
-        "Сообщение мамы (документ): прислала медицинский документ на разбор\n\n"
+        "Сообщение пациента (документ): прислал медицинский документ на разбор\n\n"
         f"Ответ: {summary}",
         encoding="utf-8",
     )
     now = datetime(2026, 5, 30, 13, 0, 0)
     turns = rd.load_recent_turns(tmp_path, now=now)
     assert turns == [
-        {"role": "user", "content": "прислала медицинский документ на разбор"},
+        {"role": "user", "content": "прислал медицинский документ на разбор"},
         {"role": "assistant", "content": summary},
     ]
 
@@ -225,5 +225,5 @@ def test_main_writes_document_turn_to_chat_history():
     """main.py действительно пишет документный ход в *_chat.txt после PDF —
     в формате, который читает recent_dialog (см. тест выше)."""
     src = (_BOT_DIR / "main.py").read_text(encoding="utf-8")
-    assert "Сообщение мамы (документ):" in src
+    assert "Сообщение пациента (документ):" in src
     assert "build_report_text_summary(analysis)" in src
