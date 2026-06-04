@@ -182,12 +182,15 @@ def test_messages_with_recent_no_history(tmp_path, monkeypatch):
 _BOT_DIR = Path(__file__).resolve().parent.parent
 
 
-def test_d2_pipeline_does_not_mix_recent_dialog():
-    """D2 (2026-05-30): медпайплайн (routing/специалист/synthesis в
-    agents.py) НЕ подмешивает recent_dialog — истории чата ему не нужно,
-    а размер запроса критичен для watchdog. Защита от регресса."""
+def test_d2_pipeline_does_not_mix_full_recent_dialog():
+    """D2 (2026-05-30) + Баг A (2026-06-04): медпайплайн НЕ тащит полную
+    цепочку диалога (messages_with_recent) — её размер критичен для watchdog,
+    ровно из-за этого её отсюда и убирали. Но теперь принимает КОРОТКУЮ
+    выжимку через параметр recent_context (capped). Защита от регресса в обе
+    стороны: не вернуть тяжёлую цепочку, не потерять лёгкий контекст."""
     src = (_BOT_DIR / "agents.py").read_text(encoding="utf-8")
     assert "messages_with_recent" not in src
+    assert "recent_context" in src
 
 
 def test_d2_chat_points_keep_recent_dialog():
@@ -227,3 +230,49 @@ def test_main_writes_document_turn_to_chat_history():
     src = (_BOT_DIR / "main.py").read_text(encoding="utf-8")
     assert "Сообщение пациента (документ):" in src
     assert "build_report_text_summary(analysis)" in src
+
+
+# ---------- Баг A: короткая выжимка диалога для разбора документа ----------
+
+def test_recent_dialog_summary_compact(tmp_path, monkeypatch):
+    """recent_dialog_summary отдаёт компактную сводку последних реплик
+    с подписями кто говорил — её подмешиваем в разбор документа."""
+    rd = _reload(monkeypatch, RECENT_DIALOG_ENABLED="true")
+    _write_chat(tmp_path, "2026-05-30_120000", "прислала анализ крови",
+                "гемоглобин в норме, обсудим железо")
+    now = datetime(2026, 5, 30, 13, 0, 0)
+    out = rd.recent_dialog_summary(tmp_path, now=now)
+    assert "Пациентка: прислала анализ крови" in out
+    assert "Команда: гемоглобин в норме" in out
+
+
+def test_recent_dialog_summary_empty_when_no_history(tmp_path, monkeypatch):
+    rd = _reload(monkeypatch, RECENT_DIALOG_ENABLED="true")
+    now = datetime(2026, 5, 30, 13, 0, 0)
+    assert rd.recent_dialog_summary(tmp_path, now=now) == ""
+
+
+def test_recent_dialog_summary_disabled_returns_empty(tmp_path, monkeypatch):
+    rd = _reload(monkeypatch, RECENT_DIALOG_ENABLED="false")
+    _write_chat(tmp_path, "2026-05-30_120000", "вопрос", "ответ")
+    now = datetime(2026, 5, 30, 13, 0, 0)
+    assert rd.recent_dialog_summary(tmp_path, now=now) == ""
+
+
+def test_recent_dialog_summary_capped_by_size(tmp_path, monkeypatch):
+    """Выжимка не превышает заданный лимит — защита watchdog по размеру."""
+    rd = _reload(monkeypatch, RECENT_DIALOG_ENABLED="true")
+    long = "очень длинная реплика " * 50
+    for i in range(8):
+        _write_chat(tmp_path, f"2026-05-30_1200{i:02d}", long, long)
+    now = datetime(2026, 5, 30, 13, 0, 0)
+    out = rd.recent_dialog_summary(tmp_path, now=now, max_chars=600)
+    assert len(out) <= 600
+
+
+def test_pipeline_passes_recent_context_to_multiagent():
+    """main.py строит выжимку и передаёт её в run_multi_agent как
+    recent_context — иначе документ снова разбирается «с чистого листа»."""
+    src = (_BOT_DIR / "main.py").read_text(encoding="utf-8")
+    assert "recent_dialog_summary(HISTORY)" in src
+    assert "recent_context=recent_context" in src

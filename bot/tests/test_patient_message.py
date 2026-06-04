@@ -56,10 +56,18 @@ def test_classify_returns_known_intent():
     assert out["intent"] == "clinical"
 
 
-def test_classify_unknown_falls_back_to_question():
+def test_classify_unknown_falls_back_to_capture():
+    # B2a (2026-06-04): при нераспознанном ответе модели склоняемся к захвату
+    # ("both"), а не к "question" — лучше прогнать через память, чем потерять.
     c = FakeClient(["мусор не json"])
     out = pm.classify_patient_message(c, "что-то непонятное")
-    assert out["intent"] in {"clinical", "question", "both", "social"}
+    assert out["intent"] == "both"
+
+
+def test_classify_invalid_intent_falls_back_to_capture():
+    c = FakeClient(['{"intent": "выдуманное"}'])
+    out = pm.classify_patient_message(c, "что-то")
+    assert out["intent"] == "both"
 
 
 # ---------- провенанс ----------
@@ -175,3 +183,17 @@ def test_question_message_replies_without_memory(spy):
     assert spy["perdoc_args"] is None
     assert res["intent"] == "question"
     assert res["reply"]
+
+
+def test_silent_capture_ingests_but_no_reply(spy):
+    # B1a (2026-06-04): «тихий» режим (generate_reply=False) для текста,
+    # пришедшего во время открытого батча — факт захватывается в память,
+    # но отдельного ответа нет (его отдаст сам батч).
+    c = FakeClient(['{"intent": "clinical"}'])
+    res = asyncio.run(pm.handle_patient_message(
+        c, app=None, text="я уже отменила Престариум, не пью",
+        ts="t4", generate_reply=False))
+    assert spy["multi_agent"] == 1
+    assert spy["perdoc_args"] is not None
+    assert res["ingested"] is True
+    assert res["reply"] == ""

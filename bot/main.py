@@ -76,7 +76,7 @@ from staff_audit import (
 from ocr import extract_text, assess_quality, save_text_sidecar
 from agents import run_multi_agent
 from patient_message import handle_patient_message, is_patient_author
-from recent_dialog import messages_with_recent
+from recent_dialog import messages_with_recent, recent_dialog_summary
 from onboarding import (
     ONBOARDING_QUESTIONS,
     add_answer_part,
@@ -761,11 +761,18 @@ async def _run_pipeline(
             if validator_result.get("any_soft"):
                 soft_context = format_soft_flags_for_synthesis(validator_result)
 
+        # Баг A (2026-06-04): подмешиваем КОРОТКУЮ выжимку недавнего разговора,
+        # чтобы документ, пришедший по ходу обсуждения (например, повторные
+        # анализы, которые бот сам попросил), разбирался в связке, а не «с
+        # чистого листа». Выжимка capped по размеру — watchdog не страдает.
+        recent_context = recent_dialog_summary(HISTORY)
+
         analysis = None
         if MULTI_AGENT and combined_ocr:
             log.info("Мультиагентный анализ (%d документов)...", len(all_paths))
             analysis = await run_multi_agent(
-                claude, combined_ocr, caption=combined_caption, extra_context=soft_context
+                claude, combined_ocr, caption=combined_caption,
+                extra_context=soft_context, recent_context=recent_context,
             )
         elif combined_ocr:
             analysis = await _analyze_ocr_text(combined_ocr, combined_caption, extra_context=soft_context)
@@ -1340,6 +1347,22 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
             "message": update.message,
         })
         log.info("Текст добавлен в батч: %s", update.message.text[:50])
+        # Баг B1a (2026-06-04): текст пациентки во время открытого батча мог
+        # нести клинический факт («я уже отменила лекарства»). Раньше он оседал
+        # только как подпись к батчу и в память специалистов не попадал.
+        # Прогоняем через тот же триаж, что и свободное сообщение — захват
+        # факта. Без ответа сейчас: батч отдаст свой отчёт сам.
+        if is_patient_author(update.message):
+            try:
+                await handle_patient_message(
+                    claude, ctx.application,
+                    text=update.message.text, ts=_ts(),
+                    generate_reply=False,
+                )
+            except Exception as e:
+                log.error(
+                    "B1a: захват факта из батч-текста упал (не критично): %s", e
+                )
         return
 
     # Свободное сообщение пациентки → разбор главврачом: сведения уходят

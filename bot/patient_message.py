@@ -62,6 +62,10 @@ INTENT_SYSTEM_PROMPT = """Ты — приёмный администратор �
 - "both" — и сведения, и вопрос одновременно.
 - "social" — благодарность, приветствие, бытовая реплика. Записывать в память нечего.
 
+ВАЖНО, легко пропустить: отмена или изменение лечения — это clinical, ДАЖЕ если сказано мимоходом или в прошедшем времени. Примеры clinical: «я уже отменила лекарство», «перестала пить таблетки», «больше не принимаю Х», «давление 150/90», «второй день кружится голова». Если в таком сообщении есть ещё и вопрос — ставь "both".
+
+При сомнении между "question" и "clinical" выбирай "both": лучше зафиксировать сведения, чем потерять их.
+
 Отвечай СТРОГО одним JSON-объектом без markdown-обёртки:
 {"intent": "clinical|question|both|social"}"""
 
@@ -78,8 +82,9 @@ def _strip_fences(text: str) -> str:
 def classify_patient_message(client, text: str) -> dict:
     """Возвращает {"intent": <одна из _VALID_INTENTS>}.
 
-    При любой ошибке парсинга — безопасный фолбэк "question": просто
-    ответить пациенту, в память ничего не писать."""
+    При любой ошибке/неоднозначности парсинга — безопасный фолбэк "both"
+    (B2a, 2026-06-04): лучше лишний раз прогнать через захват, чем потерять
+    клинический факт. Захват сам ничего не запишет, если сведений нет."""
     try:
         resp = client.messages.create(
             model=PATIENT_MSG_MODEL,
@@ -89,13 +94,13 @@ def classify_patient_message(client, text: str) -> dict:
             messages=messages_with_recent(text.strip(), _HISTORY_DIR),
         )
         raw = _strip_fences(resp.content[0].text)
-        intent = json.loads(raw).get("intent", "question")
+        intent = json.loads(raw).get("intent", "both")
         if intent not in _VALID_INTENTS:
-            intent = "question"
+            intent = "both"
         return {"intent": intent}
     except Exception as e:
-        log.warning("classify_patient_message: фолбэк question (%s)", e)
-        return {"intent": "question"}
+        log.warning("classify_patient_message: фолбэк both — лучше записать, чем потерять (%s)", e)
+        return {"intent": "both"}
 
 
 # ====== ОТВЕТ ПАЦИЕНТУ ======
@@ -235,9 +240,16 @@ async def _ingest_clinical(client, app, text: str) -> str:
     return brief
 
 
-async def handle_patient_message(client, app, text: str, ts: str) -> dict:
+async def handle_patient_message(
+    client, app, text: str, ts: str, generate_reply: bool = True
+) -> dict:
     """Главная точка входа. Возвращает
-    {"intent": str, "reply": str, "ingested": bool}."""
+    {"intent": str, "reply": str, "ingested": bool}.
+
+    generate_reply=False — «тихий» режим захвата (B1a, 2026-06-04): прогоняем
+    триаж и пишем в память, но НЕ отвечаем пациенту отдельным сообщением.
+    Нужен, когда текст пришёл во время открытого батча документов — ответ
+    отдаст сам батч, лишняя реплика была бы шумом."""
     # АРХ1: синхронные LLM-вызовы в отдельный поток — не блокируем
     # event loop, чтобы бот продолжал принимать сообщения.
     intent = (await asyncio.to_thread(classify_patient_message, client, text))["intent"]
@@ -248,6 +260,9 @@ async def handle_patient_message(client, app, text: str, ts: str) -> dict:
     if intent in {"clinical", "both"}:
         brief = await _ingest_clinical(client, app, text)
         ingested = bool(brief) or True  # обработка состоялась
+
+    if not generate_reply:
+        return {"intent": intent, "reply": "", "ingested": ingested}
 
     reply = await asyncio.to_thread(generate_patient_reply, client, text, brief=brief)
     return {"intent": intent, "reply": reply, "ingested": ingested}

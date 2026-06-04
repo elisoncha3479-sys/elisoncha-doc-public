@@ -380,6 +380,7 @@ async def run_multi_agent(
     image_bytes: bytes = None,
     caption: str = "",
     extra_context: str = "",
+    recent_context: str = "",
 ) -> dict:
     """
     Мультиагентный анализ документа.
@@ -396,6 +397,11 @@ async def run_multi_agent(
     routing_msg = f"Документ пациентки:\n\n{_clip(document_text, DOC_TEXT_LIMIT)}"
     if caption:
         routing_msg += f"\n\nКомментарий пациентки: {caption}"
+    if recent_context:
+        routing_msg += (
+            "\n\n---\nНЕДАВНИЙ РАЗГОВОР В ЧАТЕ (документ пришёл по ходу этого "
+            f"обсуждения):\n{recent_context}"
+        )
 
     # Зовём функции на каждый вызов — после approve нового специалиста
     # бот должен подключить его без перезапуска (A4).
@@ -466,12 +472,25 @@ async def run_multi_agent(
         opinions_text += f"\n\n### {o['specialist'].upper()}\n{o['opinion']}"
 
     extra_block = f"\n\n---\n\n{extra_context}\n" if extra_context else ""
+    recent_block = ""
+    if recent_context:
+        recent_block = (
+            "\n\n---\n\nНЕДАВНИЙ РАЗГОВОР В ЧАТЕ (документ пришёл по ходу этого "
+            f"обсуждения):\n{recent_context}\n\n"
+            "Если документ — продолжение этого разговора (например, ранее "
+            "просили прислать повторные/прошлые анализы), рассматривай его в "
+            "связке: сравни с тем, что уже обсуждали, отметь динамику, НЕ "
+            "разбирай с чистого листа. Если из разговора НЕ ясно, продолжение "
+            "это или отдельная новая тема — задай это уточняющим вопросом "
+            "(clarifying_questions)."
+        )
     synthesis_msg = (
         f"Тип документа: {routing.get('document_type', 'неизвестный')}\n\n"
         f"Исходный документ:\n{_clip(document_text, DOC_TEXT_LIMIT)}\n\n"
         f"---\n\n"
         f"ЗАКЛЮЧЕНИЯ СПЕЦИАЛИСТОВ:{opinions_text}"
         f"{extra_block}"
+        f"{recent_block}"
         f"\n---\n\n"
         f"Собери единый отчёт для пациентки. Проверь противоречия."
     )

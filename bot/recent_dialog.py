@@ -121,3 +121,42 @@ def messages_with_recent(
     messages=[…]."""
     prior = load_recent_turns(history_dir, now=now)
     return [*prior, {"role": "user", "content": current_user_text}]
+
+
+def recent_dialog_summary(
+    history_dir: Path,
+    now: Optional[datetime] = None,
+    max_turns: int = 4,
+    max_chars: int = 1000,
+) -> str:
+    """Короткая текстовая выжимка недавнего разговора — для подмешивания в
+    разбор документа (Баг A, 2026-06-04).
+
+    Это НЕ полная диалоговая цепочка (как messages_with_recent), а компактная
+    сводка, capped по размеру. Размер критичен: ровно из-за него недавний
+    диалог из документного пайплайна раньше убрали (рефактор D2, 2026-05-30) —
+    большой запрос ловил watchdog. Выжимка возвращает контекст, не раздувая
+    запрос.
+
+    Возвращает '' если недавнего диалога нет или ENABLED=false."""
+    turns = load_recent_turns(history_dir, now=now)
+    if not turns:
+        return ""
+    # load_recent_turns отдаёт чередующиеся user/assistant — берём хвост из
+    # последних max_turns пар (по 2 реплики на пару).
+    tail = turns[-(max_turns * 2):]
+    lines: list[str] = []
+    for m in tail:
+        who = "Пациентка" if m["role"] == "user" else "Команда"
+        text = " ".join(m["content"].split())
+        if len(text) > 200:
+            text = text[:200].rstrip() + "…"
+        lines.append(f"— {who}: {text}")
+    summary = "\n".join(lines)
+    if len(summary) > max_chars:
+        # режем с начала (старое менее ценно), не оставляя обрубок строки
+        summary = summary[-max_chars:]
+        nl = summary.find("\n")
+        if nl != -1:
+            summary = summary[nl + 1:]
+    return summary
