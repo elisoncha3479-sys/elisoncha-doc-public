@@ -49,6 +49,15 @@ PATIENT_MSG_MODEL = os.environ.get("PATIENT_MSG_MODEL", "claude-sonnet-4-6")
 CHAT_PROVENANCE_SOURCE = (
     "Сообщение пациента в чате (со слов пациентки, не подтверждено документом)"
 )
+# Ухаживающий с теми же правами добавления, что и пациент, но врачам важно
+# различать источник: его сведения метятся отдельно (2026-06-06).
+CAREGIVER_PROVENANCE_SOURCE = (
+    "Сообщение от ухаживающего в чате (со слов ухаживающего, не подтверждено документом)"
+)
+PROVENANCE_BY_ROLE = {
+    "patient": CHAT_PROVENANCE_SOURCE,
+    "caregiver": CAREGIVER_PROVENANCE_SOURCE,
+}
 
 _VALID_INTENTS = {"clinical", "question", "both", "social"}
 
@@ -183,9 +192,31 @@ def is_patient_author(msg) -> bool:
     return str(author_id) == pid
 
 
+def author_role(msg) -> Optional[str]:
+    """Роль доверенного клинического автора сообщения:
+      'patient'   — пациент (PATIENT_TG_USER_ID);
+      'caregiver' — ухаживающий/владелец (OWNER_CHAT_ID), те же права добавления;
+      None        — остальные (в клиническую память не пишут).
+
+    Ухаживающий может пополнять карту наравне с пациентом, а происхождение
+    метится отдельно. Документы по-прежнему гейтятся выше по потоку по ФИО —
+    здесь только текст-чат (2026-06-06)."""
+    author_id = str(getattr(getattr(msg, "from_user", None), "id", None) or "")
+    pid = os.environ.get("PATIENT_TG_USER_ID", "").strip()
+    cid = os.environ.get("OWNER_CHAT_ID", "").strip()
+    if pid and author_id == pid:
+        return "patient"
+    if cid and author_id == cid:
+        return "caregiver"
+    if not pid:
+        # Фолбэк v1 (PATIENT_TG_USER_ID не задан): автор — пациент.
+        return "patient"
+    return None
+
+
 # ====== ОРКЕСТРАЦИЯ ======
 
-async def _ingest_clinical(client, app, text: str) -> str:
+async def _ingest_clinical(client, app, text: str, provenance: str = CHAT_PROVENANCE_SOURCE) -> str:
     """Прогоняет текст через мультиагент, пишет per-doc с провенансом,
     обновляет профили, дёргает reconcile-hook. Возвращает краткую
     выжимку заключений специалистов (для ответа пациенту). Failsafe —
@@ -209,7 +240,7 @@ async def _ingest_clinical(client, app, text: str) -> str:
         written = write_perdoc_files(
             analysis,
             raw_ocr_text=text,
-            source_filename=CHAT_PROVENANCE_SOURCE,
+            source_filename=provenance,
         )
     except Exception as e:
         log.error("patient_message: write_perdoc упал: %s", e, exc_info=False)
@@ -251,7 +282,8 @@ async def _ingest_clinical(client, app, text: str) -> str:
 
 
 async def handle_patient_message(
-    client, app, text: str, ts: str, generate_reply: bool = True
+    client, app, text: str, ts: str, generate_reply: bool = True,
+    provenance: str = CHAT_PROVENANCE_SOURCE,
 ) -> dict:
     """Главная точка входа. Возвращает
     {"intent": str, "reply": str, "ingested": bool}.
@@ -268,7 +300,7 @@ async def handle_patient_message(
     brief = ""
     ingested = False
     if intent in {"clinical", "both"}:
-        brief = await _ingest_clinical(client, app, text)
+        brief = await _ingest_clinical(client, app, text, provenance=provenance)
         ingested = bool(brief) or True  # обработка состоялась
 
     if not generate_reply:

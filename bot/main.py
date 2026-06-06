@@ -75,7 +75,12 @@ from staff_audit import (
 
 from ocr import extract_text, assess_quality, save_text_sidecar
 from agents import run_multi_agent
-from patient_message import handle_patient_message, is_patient_author
+from patient_message import (
+    handle_patient_message,
+    is_patient_author,
+    author_role,
+    PROVENANCE_BY_ROLE,
+)
 from recent_dialog import messages_with_recent, recent_dialog_summary
 from onboarding import (
     ONBOARDING_QUESTIONS,
@@ -1352,12 +1357,14 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         # только как подпись к батчу и в память специалистов не попадал.
         # Прогоняем через тот же триаж, что и свободное сообщение — захват
         # факта. Без ответа сейчас: батч отдаст свой отчёт сам.
-        if is_patient_author(update.message):
+        role = author_role(update.message)
+        if role:
             try:
                 await handle_patient_message(
                     claude, ctx.application,
                     text=update.message.text, ts=_ts(),
                     generate_reply=False,
+                    provenance=PROVENANCE_BY_ROLE[role],
                 )
             except Exception as e:
                 log.error(
@@ -1365,26 +1372,30 @@ async def on_text(update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
                 )
         return
 
-    # Свободное сообщение пациентки → разбор главврачом: сведения уходят
-    # в память специалистов, маме — тёплый ответ (владелец, 2026-05-16,
-    # путь А). Сообщения владельца/оператора в клинику не идут — для них
-    # остаётся обычный чат-ответ ниже.
-    if is_patient_author(update.message):
+    # Свободное сообщение доверенного автора (пациент ИЛИ ухаживающий) → разбор
+    # главврачом: клинические сведения уходят в память специалистов, в чат —
+    # тёплый ответ (2026-05-16, путь А). Ухаживающий теперь с теми же правами
+    # добавления, что и пациент, но происхождение метится отдельно через
+    # provenance. Документы по-прежнему гейтятся по ФИО выше по потоку.
+    role = author_role(update.message)
+    if role:
         try:
             text = update.message.text
             (INBOX / f"{ts}_text.txt").write_text(text, encoding="utf-8")
             res = await handle_patient_message(
-                claude, ctx.application, text=text, ts=ts
+                claude, ctx.application, text=text, ts=ts,
+                provenance=PROVENANCE_BY_ROLE[role],
             )
             reply = res["reply"]
+            author_label = "пациента" if role == "patient" else "ухаживающего"
             dialog_path = HISTORY / f"{ts}_chat.txt"
             dialog_path.write_text(
-                f"Сообщение пациента ({res['intent']}): {text}\n\nОтвет: {reply}",
+                f"Сообщение {author_label} ({res['intent']}): {text}\n\nОтвет: {reply}",
                 encoding="utf-8",
             )
             await update.message.reply_text(reply)
         except Exception as e:
-            log.error("Ошибка при обработке сообщения пациента: %s", e, exc_info=True)
+            log.error("Ошибка при обработке сообщения (%s): %s", role, e, exc_info=True)
             await update.message.reply_text(
                 "Извините, не смогла ответить. Попробуйте ещё раз."
             )

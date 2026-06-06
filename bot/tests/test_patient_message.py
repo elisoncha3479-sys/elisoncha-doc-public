@@ -100,6 +100,33 @@ def test_is_patient_author_default_true_when_env_unset(monkeypatch):
     assert pm.is_patient_author(_Msg(123)) is True
 
 
+# ---------- author_role: пациент / ухаживающий / прочие ----------
+
+def test_author_role_patient(monkeypatch):
+    monkeypatch.setenv("PATIENT_TG_USER_ID", "111")
+    monkeypatch.setenv("OWNER_CHAT_ID", "222")
+    assert pm.author_role(_Msg(111)) == "patient"
+
+
+def test_author_role_caregiver(monkeypatch):
+    monkeypatch.setenv("PATIENT_TG_USER_ID", "111")
+    monkeypatch.setenv("OWNER_CHAT_ID", "222")
+    assert pm.author_role(_Msg(222)) == "caregiver"
+    assert pm.PROVENANCE_BY_ROLE["caregiver"] != pm.PROVENANCE_BY_ROLE["patient"]
+
+
+def test_author_role_stranger_is_none(monkeypatch):
+    monkeypatch.setenv("PATIENT_TG_USER_ID", "111")
+    monkeypatch.setenv("OWNER_CHAT_ID", "222")
+    assert pm.author_role(_Msg(999)) is None
+
+
+def test_author_role_fallback_patient_when_no_patient_env(monkeypatch):
+    monkeypatch.delenv("PATIENT_TG_USER_ID", raising=False)
+    monkeypatch.setenv("OWNER_CHAT_ID", "222")
+    assert pm.author_role(_Msg(777)) == "patient"
+
+
 # ---------- оркестрация ----------
 
 @pytest.fixture
@@ -182,6 +209,17 @@ def test_clinical_message_writes_memory_with_provenance(spy):
     assert spy["history_regen"] == 1
     assert res["intent"] == "clinical"
     assert res["reply"]
+
+
+def test_caregiver_provenance_threaded_to_memory(spy):
+    # Сообщение от ухаживающего: захват с пометкой «со слов ухаживающего»
+    c = FakeClient(['{"intent": "clinical"}'])
+    res = asyncio.run(pm.handle_patient_message(
+        c, app=None, text="отменили все таблетки по сердцу", ts="t5",
+        provenance=pm.CAREGIVER_PROVENANCE_SOURCE))
+    assert spy["perdoc_args"] is not None
+    assert "ухаживающего" in spy["perdoc_args"]["source"].lower()
+    assert res["intent"] == "clinical"
 
 
 def test_question_message_replies_without_memory(spy):
