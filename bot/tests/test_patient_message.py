@@ -110,6 +110,7 @@ def spy(monkeypatch):
         "perdoc_args": None,
         "refresh_args": None,
         "reconcile_args": None,
+        "history_regen": 0,
     }
 
     async def fake_multi_agent(client, document_text, caption="", extra_context=""):
@@ -138,10 +139,15 @@ def spy(monkeypatch):
         }
         return None
 
+    async def fake_history_regen():
+        state["history_regen"] += 1
+        return None
+
     monkeypatch.setattr(pm, "run_multi_agent", fake_multi_agent)
     monkeypatch.setattr(pm, "write_perdoc_files", fake_write_perdoc)
     monkeypatch.setattr(pm, "refresh_profiles_for_specialists", fake_refresh)
     monkeypatch.setattr(pm, "maybe_run_reconcile_after_refresh", fake_reconcile)
+    monkeypatch.setattr(pm, "regenerate_medical_history", fake_history_regen)
     monkeypatch.setattr(
         pm, "generate_patient_reply",
         lambda client, text, brief="": "Мария Петровна, отметили, спасибо.",
@@ -155,6 +161,7 @@ def test_social_message_does_not_touch_memory(spy):
                                                 text="спасибо вам большое!", ts="t1"))
     assert spy["multi_agent"] == 0
     assert spy["perdoc_args"] is None
+    assert spy["history_regen"] == 0
     assert res["intent"] == "social"
     assert res["reply"]
 
@@ -171,6 +178,8 @@ def test_clinical_message_writes_memory_with_provenance(spy):
     # профили обновлены и reconcile-hook вызван
     assert spy["refresh_args"] == ["nephrologist"]
     assert spy["reconcile_args"]["meds_changed"] == {"nephrologist"}
+    # Фикс 2: после обновления профилей освежается общая выжимка MEDICAL_HISTORY
+    assert spy["history_regen"] == 1
     assert res["intent"] == "clinical"
     assert res["reply"]
 

@@ -21,6 +21,7 @@ from context import (
     SYNTHESIS_DIRECTIVES,
     build_clinical_context,
     load_medical_history,
+    load_specialist_profile,
 )
 from cost_log import log_call
 
@@ -59,6 +60,12 @@ ROUTING_MODEL = os.environ.get("ROUTING_MODEL", "claude-haiku-4-5-20251001")
 # E3). Лимиты большие и настраиваемые: длинные выписки идут целиком.
 DOC_TEXT_LIMIT = int(os.environ.get("DOC_TEXT_LIMIT", "40000"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "15000"))
+# Личная память специалиста (его profile.md) подмешивается в разбор документа,
+# чтобы он опирался на ранее накопленное (в т.ч. решения из чата), а не начинал
+# с нуля. Лимит ЩЕДРЫЙ намеренно: профиль — связный медицинский документ, и
+# ключевое решение по тактике часто стоит в середине/конце; малый лимит обрезал
+# бы именно его — тот же класс бага, что вынудил поднять DOC_TEXT_LIMIT до 40k.
+SPEC_PROFILE_LIMIT = int(os.environ.get("SPEC_PROFILE_LIMIT", "40000"))
 
 
 def _clip(text: str, limit: int) -> str:
@@ -331,13 +338,34 @@ SPECIALIST_MAP = discover_specialists()
 ROUTING_PROMPT = build_routing_prompt()
 
 
-def build_specialist_system(agent_prompt: str, history_summary: str) -> str:
-    """Системный промт специалиста: его роль + сокращённая история +
-    директива не работать в силосе и называть связь с другими областями
-    явно (аудит 2026-05-16, Тема 3)."""
+def build_specialist_system(
+    agent_prompt: str,
+    history_summary: str,
+    specialist_profile: str = "",
+) -> str:
+    """Системный промт специалиста: его роль + ЕГО личная накопленная память +
+    сокращённая общая история + директива не работать в силосе и называть связь
+    с другими областями явно (аудит 2026-05-16, Тема 3).
+
+    Личная память (specialist_profile = его specialists/<slug>/profile.md)
+    подставляется ПЕРЕД общей историей и помечается как приоритетная: именно
+    сюда ложатся ранее принятые решения и знания из чата, и специалист обязан
+    на них опираться, а не разбирать новый документ с чистого листа
+    (фикс преемственности памяти, 2026-06-06)."""
+    memory_block = ""
+    if specialist_profile:
+        memory_block = (
+            f"## ТВОЯ НАКОПЛЕННАЯ ПАМЯТЬ ПО ЭТОЙ ПАЦИЕНТКЕ (по твоей специализации)\n\n"
+            f"Это твои прежние выводы и зафиксированные решения по этой пациентке, "
+            f"включая то, что уточнялось в переписке. ОПИРАЙСЯ на это в первую очередь: "
+            f"не переоткрывай уже решённые вопросы и не предлагай заново обсуждать то, "
+            f"по чему решение уже принято.\n\n{specialist_profile}\n\n"
+            f"---\n\n"
+        )
     return (
         f"{agent_prompt}\n\n"
         f"---\n\n"
+        f"{memory_block}"
         f"## История болезни (сокращённая)\n\n{history_summary}\n\n"
         f"---\n\n"
         f"{SPECIALIST_DIRECTIVE}\n\n"
@@ -438,7 +466,12 @@ async def run_multi_agent(
 
         agent_prompt = _load_agent(agent_file)
 
-        system = build_specialist_system(agent_prompt, history_summary)
+        # Личная тетрадь специалиста (specialists/<slug>/profile.md): сюда
+        # ложатся прежние выводы и решения из чата. agent_file == slug == имя
+        # папки специалиста. Раньше не подмешивалась — отсюда «анализ с нуля».
+        specialist_profile = _clip(load_specialist_profile(agent_file), SPEC_PROFILE_LIMIT)
+
+        system = build_specialist_system(agent_prompt, history_summary, specialist_profile)
 
         user_msg = f"Документ:\n\n{_clip(document_text, DOC_TEXT_LIMIT)}"
         if caption:

@@ -32,6 +32,7 @@ from profile_writer import write_perdoc_files
 from profile_refresher import refresh_profiles_for_specialists
 from reconcile import maybe_run_reconcile_after_refresh
 from recent_dialog import messages_with_recent
+from history_regenerator import regenerate_medical_history
 
 log = logging.getLogger(__name__)
 
@@ -236,6 +237,15 @@ async def _ingest_clinical(client, app, text: str) -> str:
             )
         except Exception as e:
             log.error("patient_message: reconcile-hook упал: %s", e, exc_info=False)
+
+        # Фикс 2 (2026-06-06): профили специалистов только что обновились — сразу
+        # освежаем общую выжимку MEDICAL_HISTORY, чтобы она не висела устаревшей
+        # до суточного планировщика. Её читают роутинг и синтез. Haiku, дёшево;
+        # ошибки гасятся внутри, наружу не идут.
+        try:
+            await regenerate_medical_history()
+        except Exception as e:
+            log.error("patient_message: регенерация MEDICAL_HISTORY упала: %s", e, exc_info=False)
 
     return brief
 

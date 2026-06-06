@@ -233,6 +233,27 @@ def load_specialist_profiles(only: Optional[list] = None) -> str:
     return "\n".join(parts) if parts else "(profile.md не найдены)"
 
 
+def load_specialist_profile(slug: str) -> str:
+    """Личная накопленная память ОДНОГО специалиста: содержимое
+    specialists/<slug>/profile.md. Возвращает '' если профиля ещё нет
+    (новый специалист или ни одного разбора) — тогда блок просто не
+    подставляется в промпт, без шумовых заглушек.
+
+    Это «личная тетрадь» специалиста, куда ложатся знания из чата и прежние
+    решения. Раньше при анализе нового документа специалист её не получал
+    и рассуждал с нуля (фикс преемственности памяти, 2026-06-06)."""
+    if not slug or not SPECIALISTS_DIR.exists():
+        return ""
+    profile = SPECIALISTS_DIR / slug / "profile.md"
+    if not profile.exists():
+        return ""
+    try:
+        return profile.read_text(encoding="utf-8").strip()
+    except Exception as e:
+        log.warning("Не прочла профиль %s: %s", profile, e)
+        return ""
+
+
 def load_medical_history() -> str:
     """history/MEDICAL_HISTORY.md — мастер-сводка, которую главврач регенерирует по триггерам."""
     if MEDICAL_HISTORY_FILE.exists():
